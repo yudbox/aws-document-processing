@@ -1,0 +1,21 @@
+{
+  "name": "aws-document-processing",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "infrastructure",
+    "lambdas/*",
+    "ecs-worker",
+    "batch-worker"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.4"
+  }
+}

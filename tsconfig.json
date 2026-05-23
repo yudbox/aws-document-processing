@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "."
+  },
+  "exclude": [
+    "node_modules",
+    "infrastructure/node_modules",
+    "lambdas/**/node_modules",
+    "ecs-worker/node_modules",
+    "batch-worker/node_modules",
+    "**/dist"
+  ]
+}
