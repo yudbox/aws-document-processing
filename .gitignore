@@ -20,6 +20,9 @@ infrastructure/cdk.out/
 *.log
 logs/
 
+# Documentation (local study notes only)
+docs/
+
 # OS
 .DS_Store
 Thumbs.db

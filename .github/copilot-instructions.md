@@ -2,31 +2,11 @@
 
 ## Role & Mindset
 
-You are a **Senior Full Stack Tech Lead** with deep expertise in:
+You are a **Senior Full Stack Tech Lead** architecting a production-grade, event-driven document processing system on AWS serverless infrastructure.
 
-- **AWS**: CDK, Lambda, ECS Fargate, AWS Batch, Step Functions, SQS, SNS, DynamoDB, S3, API Gateway, CloudWatch, X-Ray
-- **Backend**: Node.js, NestJS, TypeScript
-- **Frontend**: Next.js, React
-- **Architecture**: Event-driven, serverless, distributed systems, Saga pattern, CQRS
+Stack: **TypeScript + AWS CDK + Lambda + ECS Fargate + AWS Batch + Step Functions + DynamoDB + S3 + SQS/SNS**
 
-Approach every task as you would in a production engineering team — with production-grade thinking, security awareness, and architectural reasoning.
-
----
-
-## Project Context
-
-This is **NOT a pet project**. This is professional preparation for a **Full Stack Tech Lead / Team Lead** position at a senior level. Every implementation decision, every architectural choice, and every code pattern will be evaluated as if it were a real production system and discussed at a technical interview.
-
-**Source plan:** `Implementation_Plan.md` — 59 stages across 13 phases.
-
-**Stack decisions already made:**
-
-- Language: TypeScript everywhere
-- IaC: AWS CDK (not Terraform)
-- Monorepo: npm workspaces + **Turborepo** (task runner, build caching)
-- Region: `eu-central-1`
-- AWS Account: `501044375484`
-- IAM User: `serverless-lab`
+Approach every task with production-grade thinking: architecture-first, security-aware, scalable, observable.
 
 ---
 
@@ -69,51 +49,3 @@ If a decision is clear-cut or the user is not available to confirm, **always cho
 - IAM roles follow least-privilege principle
 - No public S3 buckets
 - Input validation on all Lambda API handlers
-
----
-
-## Progress Tracker
-
-| Phase | Stage                              | Status  |
-| ----- | ---------------------------------- | ------- |
-| 0     | Этап 1 — Tools installed           | ✅ Done |
-| 0     | Этап 2 — AWS account, IAM, billing | ✅ Done |
-| 0     | Этап 3 — CDK init + cdk synth      | ✅ Done |
-| 0     | Этап 4 — Monorepo structure        | ✅ Done |
-| 0     | Этап 5 — CDK Bootstrap             | ⏳ Next |
-| 1     | Этап 6–9 — Storage, DynamoDB, IAM  | 🔜      |
-| 2–13  | Этапы 10–59                        | 🔜      |
-
----
-
-## Key Facts
-
-```
-AWS Account ID : 501044375484
-IAM User       : serverless-lab
-Region         : eu-central-1
-CDK version    : 2.x
-Node.js        : v24.x
-Project root   : aws-document-processing/
-CDK project    : aws-document-processing/infrastructure/
-```
-
-## File Structure
-
-```
-aws-document-processing/
-├── .github/copilot-instructions.md  ← you are here
-├── infrastructure/   # CDK stacks (TypeScript)
-├── lambdas/
-│   ├── upload-url/
-│   ├── get-document/
-│   └── shared/
-├── ecs-worker/src/   # Docker app for Fargate (50–500 MB files)
-├── batch-worker/src/ # Docker app for AWS Batch (>500 MB)
-├── tests/
-├── package.json      # npm workspaces root
-├── turbo.json        # Turborepo pipeline config
-├── tsconfig.base.json
-├── tsconfig.json
-└── .gitignore        # includes .env
-```

@@ -6,6 +6,9 @@ export class StorageStack extends cdk.Stack {
   /** Raw documents bucket — читается в других стеках (например, WorkflowStack) */
   public readonly rawBucket: s3.Bucket;
 
+  /** Results bucket — сюда Lambda/ECS пишет результаты обработки */
+  public readonly resultsBucket: s3.Bucket;
+
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
@@ -64,7 +67,7 @@ export class StorageStack extends cdk.Stack {
       removalPolicy: RemovalPolicy.RETAIN,
     });
 
-    // ─── Outputs ─────────────────────────────────────────────────────────────
+    // ─── Outputs (raw) ───────────────────────────────────────────────────────
     // ARN и имя bucket нужны Lambda функциям и другим стекам
     new cdk.CfnOutput(this, "RawBucketName", {
       value: this.rawBucket.bucketName,
@@ -76,6 +79,73 @@ export class StorageStack extends cdk.Stack {
       value: this.rawBucket.bucketArn,
       description: "S3 bucket ARN for raw document uploads",
       exportName: "DocProcess-RawBucketArn",
+    });
+
+    // ─── Results bucket ───────────────────────────────────────────────────────
+    // Сюда Lambda/ECS пишет результаты обработки (JSON, превью, нормализованные PDF).
+    // Долгосрочное хранение: пользователь должен скачать результат в любой момент.
+    this.resultsBucket = new s3.Bucket(this, "ResultsBucket", {
+      bucketName: `docprocess-results-${this.account}-${this.region}`,
+
+      // Шифрование: SSE-S3 (baseline for production-grade storage)
+      encryption: s3.BucketEncryption.S3_MANAGED,
+
+      // Требовать HTTPS для всех запросов
+      enforceSSL: true,
+
+      // Блокировать любой публичный доступ — только сервер читает/пишет
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      publicReadAccess: false,
+
+      // Versioning отключена
+      versioned: false,
+
+      // CORS: браузер скачивает результат через pre-signed GET URL.
+      // PUT не нужен — только Lambda/ECS пишет серверно (без CORS).
+      cors: [
+        {
+          allowedOrigins: ["*"],
+          allowedMethods: [
+            s3.HttpMethods.GET, // скачивание результата пользователем
+            s3.HttpMethods.HEAD, // проверка существования
+          ],
+          allowedHeaders: ["*"],
+          maxAge: 3000,
+        },
+      ],
+
+      // Lifecycle: результаты хранятся дольше raw.
+      // После 90 дней переводим в Infrequent Access (дешевле на 46%).
+      // Пользователи редко открывают старые документы — retrieval fee оправдан.
+      lifecycleRules: [
+        {
+          id: "ArchiveOldResults",
+          enabled: true,
+          transitions: [
+            {
+              storageClass: s3.StorageClass.INFREQUENT_ACCESS,
+              transitionAfter: Duration.days(90),
+            },
+          ],
+          abortIncompleteMultipartUploadAfter: Duration.days(1),
+        },
+      ],
+
+      // RETAIN: результаты обработки нельзя потерять при cdk destroy
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
+    // ─── Outputs (results) ────────────────────────────────────────────────────
+    new cdk.CfnOutput(this, "ResultsBucketName", {
+      value: this.resultsBucket.bucketName,
+      description: "S3 bucket for processed document results",
+      exportName: "DocProcess-ResultsBucketName",
+    });
+
+    new cdk.CfnOutput(this, "ResultsBucketArn", {
+      value: this.resultsBucket.bucketArn,
+      description: "S3 bucket ARN for processed document results",
+      exportName: "DocProcess-ResultsBucketArn",
     });
   }
 }
