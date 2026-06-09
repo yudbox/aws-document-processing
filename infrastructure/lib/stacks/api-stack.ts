@@ -77,6 +77,59 @@ export class ApiStack extends cdk.Stack {
       integration: uploadUrlIntegration,
     });
 
+    // ─── Lambda интеграция для get-document ───────────────────────────────────
+    const getDocumentIntegration = new HttpLambdaIntegration(
+      "GetDocumentIntegration",
+      lambdaStack.getDocumentHandler,
+    );
+
+    // ─── Роут: GET /api/documents/{documentId} ────────────────────────────────
+    // Клиент делает GET с documentId в path параметре.
+    // Lambda читает документ из DynamoDB и возвращает его статус и метаданные.
+    // Path параметры доступны в Lambda через event.pathParameters.
+    httpApi.addRoutes({
+      path: "/api/documents/{documentId}",
+      methods: [HttpMethod.GET],
+      integration: getDocumentIntegration,
+    });
+
+    // ─── Lambda интеграция для list-documents ─────────────────────────────────
+    const listDocumentsIntegration = new HttpLambdaIntegration(
+      "ListDocumentsIntegration",
+      lambdaStack.listDocumentsHandler,
+    );
+
+    // ─── Роут: GET /api/documents ─────────────────────────────────────────────
+    // Клиент передаёт userEmail, limit, cursor через query params.
+    // GET /api/documents?userEmail=alice@example.com&limit=10
+    // GET /api/documents?userEmail=alice@example.com&limit=10&cursor=<token>
+    // Отличается от GET /api/documents/{documentId} — API Gateway маршрутизирует по-разному.
+    httpApi.addRoutes({
+      path: "/api/documents",
+      methods: [HttpMethod.GET],
+      integration: listDocumentsIntegration,
+    });
+
+    // ─── Lambda интеграция для download-result ────────────────────────────────
+    const downloadResultIntegration = new HttpLambdaIntegration(
+      "DownloadResultIntegration",
+      lambdaStack.downloadResultHandler,
+    );
+
+    // ─── Роут: GET /api/documents/{documentId}/download ───────────────────────
+    // Клиент передаёт тип результата через query param:
+    // GET /api/documents/{id}/download?type=text
+    // GET /api/documents/{id}/download?type=thumbnail
+    // GET /api/documents/{id}/download?type=metadata
+    // Lambda проверяет статус документа, генерирует pre-signed GET URL для results bucket.
+    // Примечание: маршрут /download не конфликтует с /{documentId} — API Gateway
+    // маршрутизирует по полному пути, а static segment "download" имеет приоритет над параметром.
+    httpApi.addRoutes({
+      path: "/api/documents/{documentId}/download",
+      methods: [HttpMethod.GET],
+      integration: downloadResultIntegration,
+    });
+
     this.apiUrl = httpApi.apiEndpoint;
 
     // ─── Output ───────────────────────────────────────────────────────────────

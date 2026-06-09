@@ -28,6 +28,15 @@ export class LambdaStack extends cdk.Stack {
   /** Lambda для генерации pre-signed PUT URL (этап 10) */
   public readonly uploadUrlHandler: NodejsFunction;
 
+  /** Lambda для получения статуса документа по ID (этап 12) */
+  public readonly getDocumentHandler: NodejsFunction;
+
+  /** Lambda для списка документов пользователя с cursor pagination (этап 13) */
+  public readonly listDocumentsHandler: NodejsFunction;
+
+  /** Lambda для генерации pre-signed GET URL результатов обработки (этап 14) */
+  public readonly downloadResultHandler: NodejsFunction;
+
   constructor(scope: Construct, id: string, props: LambdaStackProps) {
     super(scope, id, props);
 
@@ -88,7 +97,110 @@ export class LambdaStack extends cdk.Stack {
     // Lambda НЕ может читать из таблицы — только писать.
     databaseStack.documentsTable.grantWriteData(this.uploadUrlHandler);
 
-    // ─── Outputs ──────────────────────────────────────────────────────────────
+    // ─── get-document-handler ────────────────────────────────────────────────
+    // Принимает: pathParameters.documentId
+    // Возвращает: {documentId, fileName, fileSize, mimeType, userEmail, status, s3Key, createdAt, updatedAt}
+    // Делает GetItem в DynamoDB по PK=DOCUMENT#id, SK=METADATA.
+    this.getDocumentHandler = new NodejsFunction(this, "GetDocumentHandler", {
+      functionName: `docprocess-get-document-${this.account}-${this.region}`,
+      entry: path.join(repoRoot, "lambdas/get-document/handler.ts"),
+      projectRoot: repoRoot,
+      handler: "handler",
+
+      runtime: lambda.Runtime.NODEJS_20_X,
+      timeout: Duration.seconds(15),
+      memorySize: 256,
+
+      environment: {
+        TABLE_NAME: databaseStack.documentsTable.tableName,
+      },
+
+      bundling: {
+        minify: true,
+        sourceMap: false,
+        externalModules: [],
+      },
+    });
+
+    // ─── IAM permissions ──────────────────────────────────────────────────────
+    // grantReadData → добавляет dynamodb:GetItem, Query, Scan, BatchGetItem.
+    // Lambda может только читать — не писать, не удалять.
+    databaseStack.documentsTable.grantReadData(this.getDocumentHandler);
+
+    // ─── list-documents-handler ───────────────────────────────────────────────
+    // Принимает: queryStringParameters.userEmail, limit, cursor
+    // Возвращает: { items, nextCursor, hasMore }
+    // Делает Query по PK=USER#{email} — индекс пользователя, созданный upload-url.
+    // ScanIndexForward: false → новые документы первыми.
+    this.listDocumentsHandler = new NodejsFunction(
+      this,
+      "ListDocumentsHandler",
+      {
+        functionName: `docprocess-list-documents-${this.account}-${this.region}`,
+        entry: path.join(repoRoot, "lambdas/list-documents/handler.ts"),
+        projectRoot: repoRoot,
+        handler: "handler",
+
+        runtime: lambda.Runtime.NODEJS_20_X,
+        timeout: Duration.seconds(15),
+        memorySize: 256,
+
+        environment: {
+          TABLE_NAME: databaseStack.documentsTable.tableName,
+        },
+
+        bundling: {
+          minify: true,
+          sourceMap: false,
+          externalModules: [],
+        },
+      },
+    );
+
+    // grantReadData → Lambda может делать Query/GetItem, но не писать в таблицу.
+    databaseStack.documentsTable.grantReadData(this.listDocumentsHandler);
+
+    // ─── download-result-handler ──────────────────────────────────────────────
+    // Принимает: pathParameters.documentId, queryStringParameters.type (text|thumbnail|metadata)
+    // Возвращает: { downloadUrl, expiresIn, documentId, type, fileName }
+    // Проверяет в DynamoDB что документ существует и status=completed.
+    // Генерирует pre-signed GET URL для объекта в results bucket.
+    // S3 ключи: results/{documentId}/text.txt | thumb.png | metadata.json
+    this.downloadResultHandler = new NodejsFunction(
+      this,
+      "DownloadResultHandler",
+      {
+        functionName: `docprocess-download-result-${this.account}-${this.region}`,
+        entry: path.join(repoRoot, "lambdas/download-result/handler.ts"),
+        projectRoot: repoRoot,
+        handler: "handler",
+
+        runtime: lambda.Runtime.NODEJS_20_X,
+        timeout: Duration.seconds(15),
+        memorySize: 256,
+
+        environment: {
+          TABLE_NAME: databaseStack.documentsTable.tableName,
+          RESULTS_BUCKET: storageStack.resultsBucket.bucketName,
+          // Pre-signed URL для скачивания истекает через 15 минут.
+          // Короче чем upload (3600с) — download URL более чувствителен к утечке.
+          DOWNLOAD_URL_EXPIRES: "900",
+        },
+
+        bundling: {
+          minify: true,
+          sourceMap: false,
+          externalModules: [],
+        },
+      },
+    );
+
+    // grantReadData → только dynamodb:GetItem (нужно проверить статус документа)
+    databaseStack.documentsTable.grantReadData(this.downloadResultHandler);
+
+    // grantRead → только s3:GetObject на results bucket (не raw bucket, не PutObject)
+    storageStack.resultsBucket.grantRead(this.downloadResultHandler);
+
     new cdk.CfnOutput(this, "UploadUrlHandlerArn", {
       value: this.uploadUrlHandler.functionArn,
       description: "ARN of upload-url Lambda function",
@@ -98,6 +210,39 @@ export class LambdaStack extends cdk.Stack {
     new cdk.CfnOutput(this, "UploadUrlHandlerName", {
       value: this.uploadUrlHandler.functionName,
       description: "Name of upload-url Lambda function",
+    });
+
+    new cdk.CfnOutput(this, "GetDocumentHandlerArn", {
+      value: this.getDocumentHandler.functionArn,
+      description: "ARN of get-document Lambda function",
+      exportName: "DocProcess-GetDocumentHandlerArn",
+    });
+
+    new cdk.CfnOutput(this, "GetDocumentHandlerName", {
+      value: this.getDocumentHandler.functionName,
+      description: "Name of get-document Lambda function",
+    });
+
+    new cdk.CfnOutput(this, "ListDocumentsHandlerArn", {
+      value: this.listDocumentsHandler.functionArn,
+      description: "ARN of list-documents Lambda function",
+      exportName: "DocProcess-ListDocumentsHandlerArn",
+    });
+
+    new cdk.CfnOutput(this, "ListDocumentsHandlerName", {
+      value: this.listDocumentsHandler.functionName,
+      description: "Name of list-documents Lambda function",
+    });
+
+    new cdk.CfnOutput(this, "DownloadResultHandlerArn", {
+      value: this.downloadResultHandler.functionArn,
+      description: "ARN of download-result Lambda function",
+      exportName: "DocProcess-DownloadResultHandlerArn",
+    });
+
+    new cdk.CfnOutput(this, "DownloadResultHandlerName", {
+      value: this.downloadResultHandler.functionName,
+      description: "Name of download-result Lambda function",
     });
   }
 }
