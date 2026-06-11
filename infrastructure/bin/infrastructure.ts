@@ -5,6 +5,7 @@ import { StorageStack } from "../lib/stacks/storage-stack";
 import { DatabaseStack } from "../lib/stacks/database-stack";
 import { LambdaStack } from "../lib/stacks/lambda-stack";
 import { ApiStack } from "../lib/stacks/api-stack";
+import { MessagingStack } from "../lib/stacks/messaging-stack";
 
 const app = new cdk.App();
 
@@ -15,15 +16,25 @@ const env: cdk.Environment = {
 };
 
 new SecurityStack(app, "SecurityStack", { env });
-const storageStack = new StorageStack(app, "StorageStack", { env });
+
+// MessagingStack создаётся ДО StorageStack:
+// StorageStack нужна ссылка на processingQueue для S3 Event Notification.
+const messagingStack = new MessagingStack(app, "MessagingStack", { env });
+
+const storageStack = new StorageStack(app, "StorageStack", {
+  env,
+  processingQueue: messagingStack.processingQueue,
+});
 const databaseStack = new DatabaseStack(app, "DatabaseStack", { env });
 
-// LambdaStack зависит от StorageStack и DatabaseStack:
-// получает ссылки на bucket и table для IAM grant + env vars
+// LambdaStack зависит от StorageStack, DatabaseStack и MessagingStack:
+// - storageStack/databaseStack: IAM grant + env vars для Phase 2 handlers
+// - messagingStack: SQS Event Source Mapping для s3-event-orchestrator (Этап 17)
 const lambdaStack = new LambdaStack(app, "LambdaStack", {
   env,
   storageStack,
   databaseStack,
+  messagingStack,
 });
 
 // ApiStack зависит от LambdaStack:

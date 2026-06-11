@@ -1,0 +1,17 @@
+{
+  "name": "s3-event-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sfn": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.0",
+    "@types/node": "^24.0.0",
+    "typescript": "~5.9.3"
+  }
+}

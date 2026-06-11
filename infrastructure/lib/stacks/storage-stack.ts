@@ -1,6 +1,21 @@
 import * as cdk from "aws-cdk-lib";
-import { aws_s3 as s3, Duration, RemovalPolicy } from "aws-cdk-lib";
+import {
+  aws_s3 as s3,
+  aws_sqs as sqs,
+  Duration,
+  RemovalPolicy,
+} from "aws-cdk-lib";
+import * as s3n from "aws-cdk-lib/aws-s3-notifications";
 import { Construct } from "constructs";
+
+interface StorageStackProps extends cdk.StackProps {
+  /**
+   * SQS очередь для S3 Event Notifications (Этап 16).
+   * Когда объект создаётся с префиксом uploads/ → сообщение уходит в эту очередь.
+   * CDK автоматически добавит SQS Resource Policy разрешающий s3:SendMessage от этого bucket.
+   */
+  processingQueue: sqs.IQueue;
+}
 
 export class StorageStack extends cdk.Stack {
   /** Raw documents bucket — читается в других стеках (например, WorkflowStack) */
@@ -9,7 +24,7 @@ export class StorageStack extends cdk.Stack {
   /** Results bucket — сюда Lambda/ECS пишет результаты обработки */
   public readonly resultsBucket: s3.Bucket;
 
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+  constructor(scope: Construct, id: string, props: StorageStackProps) {
     super(scope, id, props);
 
     // ─── Raw bucket ──────────────────────────────────────────────────────────
@@ -147,5 +162,37 @@ export class StorageStack extends cdk.Stack {
       description: "S3 bucket ARN for processed document results",
       exportName: "DocProcess-ResultsBucketArn",
     });
+
+    // ─── S3 Event Notification → SQS (Этап 16) ───────────────────────────────
+    // При загрузке файла через pre-signed PUT URL клиент кладёт объект в
+    // rawBucket с ключом вида: uploads/{documentId}/{fileName}
+    //
+    // S3 автоматически публикует событие в processing-queue.
+    // Lambda s3-event-orchestrator (Этап 17) читает из очереди и стартует Step Functions.
+    //
+    // Фильтр prefix="uploads/":
+    //   - Срабатывает ТОЛЬКО на объекты в uploads/ → нет рекурсии от results/
+    //   - results/ и thumbnails/ не вызывают уведомлений
+    //
+    // Событие ObjectCreated:Put (а не ObjectCreated:*):
+    //   - Наши pre-signed URL генерируются под HTTP PUT
+    //   - Исключаем Copy и CompleteMultipartUpload → меньше false triggers
+    //
+    // SQS Resource Policy управляется в MessagingStack (aws:SourceAccount condition).
+    // Здесь используем inline destination без вызова grantSendMessages,
+    // чтобы не создавать CDK cross-stack reference StorageStack ← MessagingStack
+    // (bucket.bucketArn в queue policy = circular dependency).
+    this.rawBucket.addEventNotification(
+      s3.EventType.OBJECT_CREATED_PUT,
+      {
+        bind: (
+          _bucket: s3.IBucket,
+        ): s3.BucketNotificationDestinationConfig => ({
+          type: s3.BucketNotificationDestinationType.QUEUE,
+          arn: props.processingQueue.queueArn,
+        }),
+      },
+      { prefix: "uploads/" },
+    );
   }
 }

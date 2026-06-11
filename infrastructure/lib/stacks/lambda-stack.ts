@@ -1,14 +1,22 @@
 import * as cdk from "aws-cdk-lib";
 import { Duration, aws_lambda as lambda } from "aws-cdk-lib";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
+import { SqsEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
 import { Construct } from "constructs";
 import * as path from "path";
 import { StorageStack } from "./storage-stack";
 import { DatabaseStack } from "./database-stack";
+import { MessagingStack } from "./messaging-stack";
 
 interface LambdaStackProps extends cdk.StackProps {
   storageStack: StorageStack;
   databaseStack: DatabaseStack;
+  /**
+   * MessagingStack: нужен для подключения s3-event-orchestrator к SQS (Этап 17).
+   * Передаётся необязательно: если undefined — SQS Event Source Mapping не настраивается
+   * (удобно для постепенного деплоя).
+   */
+  messagingStack?: MessagingStack;
 }
 
 /**
@@ -37,10 +45,13 @@ export class LambdaStack extends cdk.Stack {
   /** Lambda для генерации pre-signed GET URL результатов обработки (этап 14) */
   public readonly downloadResultHandler: NodejsFunction;
 
+  /** Lambda consumer SQS → запускает Step Functions (этап 17) */
+  public readonly s3EventOrchestratorHandler: NodejsFunction;
+
   constructor(scope: Construct, id: string, props: LambdaStackProps) {
     super(scope, id, props);
 
-    const { storageStack, databaseStack } = props;
+    const { storageStack, databaseStack, messagingStack } = props;
 
     // ─── upload-url-handler ───────────────────────────────────────────────────
     // Принимает: {fileName, fileSize, mimeType, userEmail}
@@ -243,6 +254,61 @@ export class LambdaStack extends cdk.Stack {
     new cdk.CfnOutput(this, "DownloadResultHandlerName", {
       value: this.downloadResultHandler.functionName,
       description: "Name of download-result Lambda function",
+    });
+
+    // ─── s3-event-orchestrator (Этап 17) ────────────────────────────────────
+    // Читает SQS сообщения содержащие S3 Event и запускает Step Functions execution.
+    // STATE_MACHINE_ARN будет передан после создания WorkflowStack (Этап 18).
+    // Сейчас задаётся placeholder — заменится в Этапе 18.
+    this.s3EventOrchestratorHandler = new NodejsFunction(
+      this,
+      "S3EventOrchestratorHandler",
+      {
+        functionName: `docprocess-s3-event-orchestrator-${this.account}-${this.region}`,
+        entry: path.join(repoRoot, "lambdas/s3-event-orchestrator/handler.ts"),
+        projectRoot: repoRoot,
+        handler: "handler",
+
+        runtime: lambda.Runtime.NODEJS_20_X,
+
+        // 60 секунд: StartExecution — быстрый API вызов, дополнительное время для batch 10
+        timeout: Duration.seconds(60),
+        memorySize: 256,
+
+        environment: {
+          // Placeholder: заменить ARN настоящей State Machine в Этапе 18
+          STATE_MACHINE_ARN: "PLACEHOLDER_WILL_BE_SET_IN_STAGE_18",
+        },
+
+        bundling: {
+          minify: true,
+          sourceMap: false,
+          externalModules: [],
+        },
+      },
+    );
+
+    // SQS Event Source Mapping:
+    // ESM автоматически опрашивает processing-queue (обычный long polling)
+    // и вызывает Lambda с batchом до 10 сообщений.
+    // reportBatchItemFailures — включает partial batch failures:
+    //   Lambda возвращает { batchItemFailures: [...] } вместо throw —
+    //   AWS повторит только неудачные, успешные удалит автоматически.
+    if (messagingStack) {
+      this.s3EventOrchestratorHandler.addEventSource(
+        new SqsEventSource(messagingStack.processingQueue, {
+          batchSize: 10,
+          // reportBatchItemFailures: обязательно должен быть true чтобы
+          // partial batch failures работали как ожидается
+          reportBatchItemFailures: true,
+        }),
+      );
+    }
+
+    new cdk.CfnOutput(this, "S3EventOrchestratorHandlerArn", {
+      value: this.s3EventOrchestratorHandler.functionArn,
+      description: "ARN of s3-event-orchestrator Lambda function",
+      exportName: "DocProcess-S3EventOrchestratorArn",
     });
   }
 }
